@@ -127,6 +127,44 @@ export function setupSocketHandlers(io) {
       handleUserLeave(socket, roomId, username, io);
     });
 
+    // Screen share started
+    socket.on('screen-share-started', ({ roomId }) => {
+      console.log(`🖥️ User ${socket.id} started screen sharing in room: ${roomId}`);
+      socket.to(roomId).emit('user-screen-share-started', { userId: socket.id });
+    });
+
+    // Screen share stopped
+    socket.on('screen-share-stopped', ({ roomId }) => {
+      console.log(`🛑 User ${socket.id} stopped screen sharing in room: ${roomId}`);
+      socket.to(roomId).emit('user-screen-share-stopped', { userId: socket.id });
+    });
+
+    // Screen share offer
+    socket.on('screen-share-offer', ({ roomId, targetId, offer }) => {
+      socket.to(targetId).emit('screen-share-offer', {
+        senderId: socket.id,
+        offer
+      });
+      console.log(`🖥️ Screen share offer sent from ${socket.id} to ${targetId}`);
+    });
+
+    // Screen share answer
+    socket.on('screen-share-answer', ({ roomId, targetId, answer }) => {
+      socket.to(targetId).emit('screen-share-answer', {
+        senderId: socket.id,
+        answer
+      });
+      console.log(`🖥️ Screen share answer sent from ${socket.id} to ${targetId}`);
+    });
+
+    // Screen ICE candidate
+    socket.on('screen-ice-candidate', ({ roomId, targetId, candidate }) => {
+      socket.to(targetId).emit('screen-ice-candidate', {
+        senderId: socket.id,
+        candidate
+      });
+    });
+
     // DISCONNECT
     socket.on('disconnect', () => {
       console.log('❌ User disconnected:', socket.id);
