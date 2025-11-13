@@ -11,14 +11,19 @@ const ICE_SERVERS = {
   ]
 };
 
-export const useWebRTC = (roomId, username) => {
+export const useWebRTC = (roomId) => {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState(new Map());
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [screenStream, setScreenStream] = useState(null);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState(new Map());
   
   const peerConnections = useRef(new Map());
+  const screenPeerConnections = useRef(new Map());
   const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
 
   // Khởi tạo local media stream (camera + mic)
   const initializeMedia = useCallback(async () => {
