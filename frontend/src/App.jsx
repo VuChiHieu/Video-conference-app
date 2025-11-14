@@ -1,9 +1,10 @@
-// frontend/src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Users, Video, Mic, MicOff, VideoOff, PhoneOff, Settings, MoreVertical, Smile, Paperclip, Monitor } from 'lucide-react';
+import { Send, Users, Video, Mic, MicOff, VideoOff, PhoneOff, Settings, MoreVertical, Smile, Paperclip, Monitor, X } from 'lucide-react';
 import socketService from './services/socketService';
 import { useWebRTC } from './hooks/useWebRTC';
 import VideoPlayer from './components/VideoPlayer';
+import FileMessage from './components/FileMessage';
+import EmojiPicker from 'emoji-picker-react';
 
 function App() {
   const [roomId, setRoomId] = useState('');
@@ -13,7 +14,11 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const emojiPickerRef = useRef(null);
 
   // WebRTC hook
   const {
@@ -21,10 +26,15 @@ function App() {
     remoteStreams,
     isAudioEnabled,
     isVideoEnabled,
+    screenStream,
+    isScreenSharing,
+    remoteScreenStreams,
     initializeMedia,
     createOffer,
     toggleAudio,
     toggleVideo,
+    startScreenShare,
+    stopScreenShare,
     handlePeerDisconnect,
     cleanup
   } = useWebRTC(roomId);
@@ -145,6 +155,23 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showEmojiPicker]);
+
   const handleJoinRoom = () => {
     if (roomId.trim() && username.trim()) {
       console.log(`🚀 Attempting to join room: ${roomId} as ${username}`);
@@ -188,6 +215,77 @@ function App() {
     console.log(`📹 Bạn đã ${enabled ? 'bật' : 'tắt'} camera`);
   };
 
+  const handleScreenShare = async () => {
+    try {
+      if (isScreenSharing) {
+        stopScreenShare();
+      } else {
+        await startScreenShare();
+      }
+    } catch (error) {
+      console.error('Screen share error:', error);
+    }
+  };
+
+  const handleFileSelect = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File quá lớn! Kích thước tối đa là 10MB');
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('http://localhost:3001/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await response.json();
+      
+      // Send file message via socket
+      socketService.emit('file-message', {
+        roomId,
+        username,
+        fileData: data.file
+      });
+
+      console.log('✅ File uploaded:', data.file.originalName);
+    } catch (error) {
+      console.error('❌ File upload error:', error);
+      alert('Không thể upload file. Vui lòng thử lại!');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handlePaperclipClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleEmojiClick = (emojiObject) => {
+    setMessage(prev => prev + emojiObject.emoji);
+    setShowEmojiPicker(false);
+  };
+
+  const toggleEmojiPicker = () => {
+    setShowEmojiPicker(!showEmojiPicker);
+  };
+
   const leaveRoom = () => {
     setIsJoined(false);
     setMessages([]);
@@ -195,6 +293,8 @@ function App() {
     setRoomId('');
     setConnectionStatus('disconnected');
   };
+
+  
 
   if (!isJoined) {
     return (
@@ -316,39 +416,82 @@ function App() {
                 </div>
               </div>
             ) : (
-              participants.map((participant) => {
-                // Nếu là chính mình, dùng state local và local stream
-                if (participant.isMe) {
+              <>
+                {/* Screen Share - Hiển thị full width nếu có */}
+                {(screenStream || remoteScreenStreams.size > 0) && (
+                  <div className="col-span-full mb-4">
+                    <div className="bg-gray-800 rounded-xl overflow-hidden border-2 border-indigo-500 shadow-2xl">
+                      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2 flex items-center gap-2">
+                        <Monitor className="w-5 h-5 text-white" />
+                        <span className="text-white font-semibold">
+                          {screenStream ? 'Bạn đang chia sẻ màn hình' : 'Đang xem màn hình được chia sẻ'}
+                        </span>
+                      </div>
+                      <div className="aspect-video bg-black">
+                        {screenStream ? (
+                          <VideoPlayer
+                            stream={screenStream}
+                            username={username}
+                            isMuted={true}
+                            isVideoOff={false}
+                            isLocal={true}
+                          />
+                        ) : (
+                          Array.from(remoteScreenStreams.entries()).map(([peerId, stream]) => {
+                            const participant = participants.find(p => p.id === peerId);
+                            return (
+                              <VideoPlayer
+                                key={peerId}
+                                stream={stream}
+                                username={participant?.username || 'Unknown'}
+                                isMuted={true}
+                                isVideoOff={false}
+                                isLocal={false}
+                              />
+                            );
+                          })[0]
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Regular Video Grid */}
+                {participants.map((participant) => {
+                  // Nếu là chính mình, dùng state local và local stream
+                  if (participant.isMe) {
+                    return (
+                      <VideoPlayer
+                        key={participant.id}
+                        stream={localStream}
+                        username={participant.username}
+                        isMuted={!isAudioEnabled}
+                        isVideoOff={!isVideoEnabled}
+                        isLocal={true}
+                      />
+                    );
+                  }
+                  
+                  // Nếu là người khác, dùng remote stream
+                  const remoteStream = remoteStreams.get(participant.id);
                   return (
                     <VideoPlayer
                       key={participant.id}
-                      stream={localStream}
+                      stream={remoteStream}
                       username={participant.username}
-                      isMuted={!isAudioEnabled}
-                      isVideoOff={!isVideoEnabled}
-                      isLocal={true}
+                      isMuted={participant.isMuted}
+                      isVideoOff={participant.isVideoOff}
+                      isLocal={false}
                     />
                   );
-                }
-                
-                // Nếu là người khác, dùng remote stream
-                const remoteStream = remoteStreams.get(participant.id);
-                return (
-                  <VideoPlayer
-                    key={participant.id}
-                    stream={remoteStream}
-                    username={participant.username}
-                    isMuted={participant.isMuted}
-                    isVideoOff={participant.isVideoOff}
-                    isLocal={false}
-                  />
-                );
-              })
+                })}
+              </>
             )}
           </div>
         </div>
 
-        <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col">
+        {/* Chat Sidebar */}
+        <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col relative">
           <div className="px-4 py-3 border-b border-gray-700">
             <h3 className="text-white font-semibold flex items-center gap-2">
               <Users className="w-5 h-5" />
@@ -371,6 +514,17 @@ function App() {
                         {msg.message}
                       </span>
                     </div>
+                  ) : msg.type === 'file' ? (
+                    <div className={`flex flex-col ${msg.username === username ? 'items-end' : 'items-start'}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs text-gray-400">{msg.username}</span>
+                        <span className="text-xs text-gray-500">{formatTime(msg.timestamp)}</span>
+                      </div>
+                      <FileMessage 
+                        fileData={msg.fileData} 
+                        isOwn={msg.username === username}
+                      />
+                    </div>
                   ) : (
                     <div className={`flex flex-col ${msg.username === username ? 'items-end' : 'items-start'}`}>
                       <div className="flex items-center gap-2 mb-1">
@@ -392,13 +546,59 @@ function App() {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="p-4 border-t border-gray-700">
+          <div className="p-4 border-t border-gray-700 relative">
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleFileSelect}
+              className="hidden"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+            />
+            
+            {/* Emoji Picker - Nằm trong chat sidebar */}
+            {showEmojiPicker && (
+              <div 
+                ref={emojiPickerRef} 
+                className="absolute bottom-full right-0 mb-2 shadow-2xl"
+                style={{ zIndex: 1000 }}
+              >
+                <EmojiPicker
+                  onEmojiClick={handleEmojiClick}
+                  theme="dark"
+                  width={280}
+                  height={350}
+                  searchPlaceholder="Tìm emoji..."
+                  previewConfig={{ showPreview: false }}
+                  skinTonesDisabled
+                />
+              </div>
+            )}
+
             <div className="flex items-center gap-2 bg-gray-700 rounded-xl p-2">
-              <button type="button" className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-600 transition-colors flex-shrink-0">
-                <Smile className="w-5 h-5" />
+              <button 
+                type="button" 
+                onClick={toggleEmojiPicker}
+                className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
+                  showEmojiPicker 
+                    ? 'text-yellow-400 bg-gray-600' 
+                    : 'text-gray-400 hover:text-white hover:bg-gray-600'
+                }`}
+                title="Chọn emoji"
+              >
+                {showEmojiPicker ? <X className="w-5 h-5" /> : <Smile className="w-5 h-5" />}
               </button>
-              <button type="button" className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-600 transition-colors flex-shrink-0">
-                <Paperclip className="w-5 h-5" />
+              <button 
+                type="button" 
+                onClick={handlePaperclipClick}
+                disabled={isUploading}
+                className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-600 transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Gửi file"
+              >
+                {isUploading ? (
+                  <div className="w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <Paperclip className="w-5 h-5" />
+                )}
               </button>
               <input
                 type="text"
@@ -447,8 +647,13 @@ function App() {
           </button>
 
           <button
-            className="p-4 rounded-xl bg-gray-700 hover:bg-gray-600 text-white transition-all"
-            title="Chia sẻ màn hình"
+            onClick={handleScreenShare}
+            className={`p-4 rounded-xl transition-all ${
+              isScreenSharing
+                ? 'bg-indigo-600 hover:bg-indigo-700 text-white ring-2 ring-indigo-400'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+            }`}
+            title={isScreenSharing ? 'Dừng chia sẻ màn hình' : 'Chia sẻ màn hình'}
           >
             <Monitor className="w-6 h-6" />
           </button>

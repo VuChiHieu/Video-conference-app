@@ -13,10 +13,21 @@ const VideoPlayer = ({
   const videoRef = useRef(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const videoEl = videoRef.current;
+    if (videoEl && stream) {
+      videoEl.srcObject = stream;
+      const playPromise = videoEl.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => console.log(`🎬 Video playing for ${username}`))
+          .catch((error) => console.warn(`⚠️ Autoplay prevented for ${username}:`, error));
+      }
     }
-  }, [stream]);
+
+    return () => {
+      if (videoEl) videoEl.srcObject = null; // cleanup stream
+    };
+  }, [stream, username]);
 
   return (
     <div className={`relative bg-gray-800 rounded-xl overflow-hidden border-2 border-gray-700 hover:border-indigo-500 transition-all group ${className}`}>

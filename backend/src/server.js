@@ -9,9 +9,35 @@ import { upload, getFileInfo, formatFileSize, cleanupOldFiles } from './fileHand
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+dotenv.config();
+
+const app = express();
+const server = createServer(app);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// CORS configuration
+const io = new Server(server, {
+  cors: {
+    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Serve static files từ uploads directory
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Upload single file
 app.post('/api/upload', upload.single('file'), (req, res) => {
   try {
     if (!req.file) {
@@ -51,29 +77,6 @@ app.use((error, req, res, next) => {
 setInterval(() => {
   cleanupOldFiles(24); // Delete files older than 24 hours
 }, 6 * 60 * 60 * 1000);
-
-dotenv.config();
-
-const app = express();
-const server = createServer(app);
-
-// CORS configuration
-const io = new Server(server, {
-  cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
-});
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
 
 // API endpoint để lấy danh sách phòng
 app.get('/api/rooms', (req, res) => {
