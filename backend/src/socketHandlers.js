@@ -5,7 +5,7 @@ const roomManager = new RoomManager();
 
 export function setupSocketHandlers(io) {
   io.on('connection', (socket) => {
-    console.log('✅ User connected:', socket.id);
+    console.log('User connected:', socket.id);
 
     // JOIN ROOM
     socket.on('join-room', ({ roomId, username }) => {
@@ -68,24 +68,6 @@ export function setupSocketHandlers(io) {
       }
     });
 
-    socket.on('file-message', ({ roomId, username, fileData }) => {
-      try {
-        const fileMsg = {
-          type: 'file',
-          username,
-          fileData,
-          timestamp: new Date().toISOString()
-        };
-
-        roomManager.addMessage(roomId, fileMsg);
-        io.to(roomId).emit('chat-message', fileMsg);
-
-        console.log(`📎 [${roomId}] ${username} sent file: ${fileData.originalName}`);
-      } catch (error) {
-        console.error('Error sending file message:', error);
-      }
-    });
-
     // TOGGLE MUTE
     socket.on('toggle-mute', ({ roomId, isMuted }) => {
       try {
@@ -145,7 +127,6 @@ export function setupSocketHandlers(io) {
       handleUserLeave(socket, roomId, username, io);
     });
 
-    // Screen share started
     socket.on('screen-share-started', ({ roomId }) => {
       console.log(`🖥️ User ${socket.id} started screen sharing in room: ${roomId}`);
       socket.to(roomId).emit('user-screen-share-started', { userId: socket.id });
@@ -181,6 +162,25 @@ export function setupSocketHandlers(io) {
         senderId: socket.id,
         candidate
       });
+    });
+
+    // FILE MESSAGE
+    socket.on('file-message', ({ roomId, username, fileData }) => {
+      try {
+        const fileMsg = {
+          type: 'file',
+          username,
+          fileData,
+          timestamp: new Date().toISOString()
+        };
+
+        roomManager.addMessage(roomId, fileMsg);
+        io.to(roomId).emit('chat-message', fileMsg);
+
+        console.log(`📎 [${roomId}] ${username} sent file: ${fileData.originalName}`);
+      } catch (error) {
+        console.error('Error sending file message:', error);
+      }
     });
 
     // DISCONNECT
