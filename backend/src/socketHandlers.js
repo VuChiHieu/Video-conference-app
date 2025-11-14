@@ -68,6 +68,24 @@ export function setupSocketHandlers(io) {
       }
     });
 
+    socket.on('file-message', ({ roomId, username, fileData }) => {
+      try {
+        const fileMsg = {
+          type: 'file',
+          username,
+          fileData,
+          timestamp: new Date().toISOString()
+        };
+
+        roomManager.addMessage(roomId, fileMsg);
+        io.to(roomId).emit('chat-message', fileMsg);
+
+        console.log(`📎 [${roomId}] ${username} sent file: ${fileData.originalName}`);
+      } catch (error) {
+        console.error('Error sending file message:', error);
+      }
+    });
+
     // TOGGLE MUTE
     socket.on('toggle-mute', ({ roomId, isMuted }) => {
       try {

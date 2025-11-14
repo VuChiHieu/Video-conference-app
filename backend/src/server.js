@@ -5,6 +5,52 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { setupSocketHandlers } from './socketHandlers.js';
+import { upload, getFileInfo, formatFileSize, cleanupOldFiles } from './fileHandler.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const fileInfo = getFileInfo(req.file);
+    console.log('📤 File uploaded:', fileInfo.originalName, '-', formatFileSize(fileInfo.size));
+
+    res.json({
+      success: true,
+      file: fileInfo
+    });
+  } catch (error) {
+    console.error('❌ Upload error:', error);
+    res.status(500).json({ error: 'Failed to upload file' });
+  }
+});
+
+// Error handling middleware for multer
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File too large. Max size is 10MB' });
+    }
+    return res.status(400).json({ error: error.message });
+  }
+  
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  
+  next();
+});
+
+// Cleanup old files every 6 hours
+setInterval(() => {
+  cleanupOldFiles(24); // Delete files older than 24 hours
+}, 6 * 60 * 60 * 1000);
 
 dotenv.config();
 
