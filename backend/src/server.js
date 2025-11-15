@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import multer from 'multer';
 import { setupSocketHandlers } from './socketHandlers.js';
 import { upload, getFileInfo, formatFileSize, cleanupOldFiles } from './fileHandler.js';
 import path from 'path';
@@ -27,7 +28,8 @@ const io = new Server(server, {
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // ✅ IMPROVED: Added limit
+app.use(express.urlencoded({ extended: true, limit: '10mb' })); // ✅ ADDED: For form data
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -57,6 +59,18 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   }
 });
 
+// API endpoint để lấy danh sách phòng
+app.get('/api/rooms', (req, res) => {
+  const rooms = Array.from(io.sockets.adapter.rooms.entries())
+    .filter(([key]) => !io.sockets.sockets.has(key))
+    .map(([id, sockets]) => ({
+      id,
+      participantCount: sockets.size
+    }));
+  
+  res.json(rooms);
+});
+
 // Error handling middleware for multer
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
@@ -73,32 +87,53 @@ app.use((error, req, res, next) => {
   next();
 });
 
+// Setup Socket.IO handlers
+setupSocketHandlers(io);
+
+// ✅ ADDED: Socket.IO error handling
+io.on('error', (error) => {
+  console.error('❌ Socket.IO error:', error);
+});
+
 // Cleanup old files every 6 hours
-setInterval(() => {
+const cleanupInterval = setInterval(() => {
   cleanupOldFiles(24); // Delete files older than 24 hours
 }, 6 * 60 * 60 * 1000);
 
-// API endpoint để lấy danh sách phòng
-app.get('/api/rooms', (req, res) => {
-  const rooms = Array.from(io.sockets.adapter.rooms.entries())
-    .filter(([key]) => !io.sockets.sockets.has(key))
-    .map(([id, sockets]) => ({
-      id,
-      participantCount: sockets.size
-    }));
-  
-  res.json(rooms);
-});
+// ✅ ADDED: Graceful shutdown
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
-// Setup Socket.IO handlers
-setupSocketHandlers(io);
+async function shutdown() {
+  console.log('\n🛑 Server shutting down gracefully...');
+  
+  clearInterval(cleanupInterval);
+  
+ const { roomManager } = await import('./socketHandlers.js');
+ roomManager?.stopAutoCleanup();
+  
+  io.close(() => {
+    console.log('✅ Socket.IO closed');
+  });
+  
+  server.close(() => {
+    console.log('✅ HTTP server closed');
+    process.exit(0);
+  });
+  
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('⚠️  Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
 
 const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, () => {
-  console.log('🚀 ========================================');
-  console.log(`🌐 Server đang chạy tại: http://localhost:${PORT}`);
-  console.log(`📡 Socket.IO server sẵn sàng`);
-  console.log(`🔗 Client URL: ${process.env.CLIENT_URL}`);
-  console.log('🚀 ========================================');
+  console.log(' ========================================');
+  console.log(` ✅ Server đang chạy tại: http://localhost:${PORT}`);
+  console.log(` 🔌 Socket.IO server sẵn sàng`);
+  console.log(` 🌐 Client URL: ${process.env.CLIENT_URL || 'http://localhost:3000'}`);
+  console.log(' ========================================');
 });
