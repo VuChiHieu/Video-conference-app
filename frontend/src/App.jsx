@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Users, Video, Mic, MicOff, VideoOff, PhoneOff, Settings, MoreVertical, Smile, Paperclip, Monitor, X } from 'lucide-react';
 import socketService from './services/socketService';
 import { useWebRTC } from './hooks/useWebRTC';
+import ScreenSharePlayer from './components/ScreenSharePlayer';
 import VideoPlayer from './components/VideoPlayer';
 import FileMessage from './components/FileMessage';
 import EmojiPicker from 'emoji-picker-react';
@@ -20,7 +21,7 @@ function App() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const emojiPickerRef = useRef(null);
 
-  // WebRTC hook
+  // ✅ FIX LỖI 4: Removed remoteScreenStreams (không tồn tại)
   const {
     localStream,
     remoteStreams,
@@ -28,7 +29,7 @@ function App() {
     isVideoEnabled,
     screenStream,
     isScreenSharing,
-    remoteScreenStreams,
+    streamVersion,
     initializeMedia,
     createOffer,
     toggleAudio,
@@ -43,99 +44,105 @@ function App() {
     if (isJoined) {
       console.log('🚀 Starting initialization...');
       
-      // Khởi tạo media trước
+      const socket = socketService.connect();
+
+      socket.on('connect', () => {
+        console.log('✅ Connected to server:', socket.id);
+        setConnectionStatus('connected');
+      });
+
+      socket.on('disconnect', () => {
+        console.log('❌ Disconnected from server');
+        setConnectionStatus('disconnected');
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('❌ Connection error:', error);
+        setConnectionStatus('error');
+      });
+
+      socket.on('room-joined', ({ participants: roomParticipants, messages: roomMessages }) => {
+        console.log('🏠 Joined room:', roomId);
+        console.log('👥 Participants:', roomParticipants);
+        setParticipants(roomParticipants.map(p => ({
+          ...p,
+          isMe: p.id === socket.id
+        })));
+        setMessages(roomMessages);
+
+        setTimeout(() => {
+          roomParticipants.forEach(participant => {
+            if (participant.id !== socket.id) {
+              console.log('📞 Creating offer for existing participant:', participant.id);
+              createOffer(participant.id);
+            }
+          });
+        }, 3000);
+      });
+
+      socket.on('user-joined', (newUser) => {
+        console.log('👤 New user joined:', newUser);
+        setParticipants(prev => [...prev, { ...newUser, isMe: false }]);
+        
+        setTimeout(() => {
+          console.log('📞 Creating offer for new user:', newUser.id);
+          createOffer(newUser.id);
+        }, 3000);
+      });
+
+      socket.on('user-left', ({ userId }) => {
+        console.log('👋 User left:', userId);
+        setParticipants(prev => prev.filter(p => p.id !== userId));
+        handlePeerDisconnect(userId);
+      });
+
+      socket.on('chat-message', (msg) => {
+        console.log('💬 New message:', msg);
+        setMessages(prev => [...prev, msg]);
+      });
+
+      socket.on('user-toggle-mute', ({ userId, isMuted }) => {
+        console.log(`🔇 User ${userId} ${isMuted ? 'muted' : 'unmuted'}`);
+        setParticipants(prev => prev.map(p =>
+          p.id === userId ? { ...p, isMuted } : p
+        ));
+      });
+
+      socket.on('user-toggle-video', ({ userId, isVideoOff }) => {
+        console.log(`📹 User ${userId} ${isVideoOff ? 'turned off' : 'turned on'} video`);
+        setParticipants(prev => prev.map(p =>
+          p.id === userId ? { ...p, isVideoOff } : p
+        ));
+      });
+
+      socket.on('user-screen-share-started', ({ userId }) => {
+        console.log(`🖥️ User ${userId} started screen sharing`);
+        setParticipants(prev => prev.map(p =>
+          p.id === userId ? { ...p, isScreenSharing: true } : p
+        ));
+      });
+
+      socket.on('user-screen-share-stopped', ({ userId }) => {
+        console.log(`🛑 User ${userId} stopped screen sharing`);
+        setParticipants(prev => prev.map(p =>
+          p.id === userId ? { ...p, isScreenSharing: false } : p
+        ));
+      });
+
       initializeMedia()
         .then((stream) => {
           console.log('✅ Media initialized successfully:', stream.id);
           
-          // Kết nối Socket.IO
-          const socket = socketService.connect();
-
-          // Connection status
-          socket.on('connect', () => {
-            console.log('✅ Connected to server:', socket.id);
-            setConnectionStatus('connected');
-            
-            // Join room sau khi connect thành công
-            socket.emit('join-room', { roomId, username });
-          });
-
-          socket.on('disconnect', () => {
-            console.log('❌ Disconnected from server');
-            setConnectionStatus('disconnected');
-          });
-
-          socket.on('connect_error', (error) => {
-            console.error('❌ Connection error:', error);
-            setConnectionStatus('error');
-          });
-
-          // Room joined - nhận danh sách participants và messages
-          socket.on('room-joined', ({ participants: roomParticipants, messages: roomMessages }) => {
-            console.log('🏠 Joined room:', roomId);
-            console.log('👥 Participants:', roomParticipants);
-            setParticipants(roomParticipants.map(p => ({
-              ...p,
-              isMe: p.id === socket.id
-            })));
-            setMessages(roomMessages);
-
-            // Tạo offer cho tất cả participants đã có trong room
-            roomParticipants.forEach(participant => {
-              if (participant.id !== socket.id) {
-                console.log('📞 Creating offer for existing participant:', participant.id);
-                setTimeout(() => createOffer(participant.id), 1000);
-              }
-            });
-          });
-
-          // User joined - user mới vào
-          socket.on('user-joined', (newUser) => {
-            console.log('👤 New user joined:', newUser);
-            setParticipants(prev => [...prev, { ...newUser, isMe: false }]);
-            
-            // User hiện tại tạo offer cho user mới
-            console.log('📞 Creating offer for new user:', newUser.id);
-            setTimeout(() => createOffer(newUser.id), 1000);
-          });
-
-          // User left
-          socket.on('user-left', ({ userId }) => {
-            console.log('👋 User left:', userId);
-            setParticipants(prev => prev.filter(p => p.id !== userId));
-            handlePeerDisconnect(userId);
-          });
-
-          // Chat message
-          socket.on('chat-message', (msg) => {
-            console.log('💬 New message:', msg);
-            setMessages(prev => [...prev, msg]);
-          });
-
-          // User toggle mute
-          socket.on('user-toggle-mute', ({ userId, isMuted }) => {
-            console.log(`🔇 User ${userId} ${isMuted ? 'muted' : 'unmuted'}`);
-            setParticipants(prev => prev.map(p =>
-              p.id === userId ? { ...p, isMuted } : p
-            ));
-          });
-
-          // User toggle video
-          socket.on('user-toggle-video', ({ userId, isVideoOff }) => {
-            console.log(`📹 User ${userId} ${isVideoOff ? 'turned off' : 'turned on'} video`);
-            setParticipants(prev => prev.map(p =>
-              p.id === userId ? { ...p, isVideoOff } : p
-            ));
-          });
-
-          // Nếu đã connect rồi, emit join-room ngay
           if (socket.connected) {
+            console.log('📤 Emitting join-room...');
             socket.emit('join-room', { roomId, username });
+          } else {
+            console.log('⏳ Waiting for socket connection before joining room...');
           }
         })
         .catch((error) => {
           console.error('❌ Failed to initialize media:', error);
-          alert(`Không thể truy cập camera/microphone!\n\nLỗi: ${error.message}\n\nVui lòng:\n1. Cấp quyền truy cập trong trình duyệt\n2. Kiểm tra camera/mic có hoạt động không\n3. Thử refresh trang (F5)`);
+          alert(`Không thể truy cập camera/microphone!\n\nLỗi: ${error.message}`);
           setIsJoined(false);
         });
 
@@ -144,6 +151,17 @@ function App() {
         const socket = socketService.getSocket();
         if (socket) {
           socket.emit('leave-room', { roomId, username });
+          socket.off('connect');
+          socket.off('disconnect');
+          socket.off('connect_error');
+          socket.off('room-joined');
+          socket.off('user-joined');
+          socket.off('user-left');
+          socket.off('chat-message');
+          socket.off('user-toggle-mute');
+          socket.off('user-toggle-video');
+          socket.off('user-screen-share-started');
+          socket.off('user-screen-share-stopped');
         }
         cleanup();
         socketService.disconnect();
@@ -155,7 +173,6 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Close emoji picker when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
@@ -211,7 +228,13 @@ function App() {
 
   const handleToggleVideo = () => {
     const enabled = toggleVideo();
-    socketService.emit('toggle-video', { roomId, isVideoOff: !enabled });
+    
+    // ✅ FIX: Đợi toggleVideo complete trước khi emit
+    setTimeout(() => {
+      socketService.emit('toggle-video', { roomId, isVideoOff: !enabled });
+      console.log(`📹 Emitted toggle-video: isVideoOff=${!enabled}`);
+    }, 150); // Delay để ensure track state đã sync
+    
     console.log(`📹 Bạn đã ${enabled ? 'bật' : 'tắt'} camera`);
   };
 
@@ -231,7 +254,6 @@ function App() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Check file size (10MB limit)
     if (file.size > 10 * 1024 * 1024) {
       alert('File quá lớn! Kích thước tối đa là 10MB');
       return;
@@ -254,7 +276,6 @@ function App() {
 
       const data = await response.json();
       
-      // Send file message via socket
       socketService.emit('file-message', {
         roomId,
         username,
@@ -293,8 +314,6 @@ function App() {
     setRoomId('');
     setConnectionStatus('disconnected');
   };
-
-  
 
   if (!isJoined) {
     return (
@@ -417,80 +436,106 @@ function App() {
               </div>
             ) : (
               <>
-                {/* Screen Share - Hiển thị full width nếu có */}
-                {(screenStream || remoteScreenStreams.size > 0) && (
+                {(isScreenSharing || participants.some(p => p.isScreenSharing)) && (
                   <div className="col-span-full mb-4">
                     <div className="bg-gray-800 rounded-xl overflow-hidden border-2 border-indigo-500 shadow-2xl">
                       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2 flex items-center gap-2">
                         <Monitor className="w-5 h-5 text-white" />
                         <span className="text-white font-semibold">
-                          {screenStream ? 'Bạn đang chia sẻ màn hình' : 'Đang xem màn hình được chia sẻ'}
+                          {isScreenSharing 
+                            ? 'Bạn đang chia sẻ màn hình' 
+                            : `${participants.find(p => p.isScreenSharing)?.username} đang chia sẻ màn hình`
+                          }
                         </span>
                       </div>
-                      <div className="aspect-video bg-black">
-                        {screenStream ? (
-                          <VideoPlayer
-                            stream={screenStream}
-                            username={username}
-                            isMuted={true}
-                            isVideoOff={false}
-                            isLocal={true}
-                          />
-                        ) : (
-                          Array.from(remoteScreenStreams.entries()).map(([peerId, stream]) => {
-                            const participant = participants.find(p => p.id === peerId);
+                      <div className="aspect-video bg-black relative">
+                        {(() => {
+                          if (isScreenSharing) {
                             return (
-                              <VideoPlayer
-                                key={peerId}
-                                stream={stream}
-                                username={participant?.username || 'Unknown'}
-                                isMuted={true}
-                                isVideoOff={false}
-                                isLocal={false}
+                              <ScreenSharePlayer
+                                stream={screenStream}
+                                username={username}
+                                isLocal={true}
                               />
                             );
-                          })[0]
-                        )}
+                          } else {
+                            const sharingPeer = participants.find(p => p.isScreenSharing && !p.isMe);
+                            if (!sharingPeer) {
+                              return (
+                                <div className="flex items-center justify-center h-full text-white">
+                                  <p className="text-sm">Không tìm thấy người chia sẻ</p>
+                                </div>
+                              );
+                            }
+
+                            const remoteStream = remoteStreams.get(sharingPeer.id);
+                            
+                            if (!remoteStream) {
+                              return (
+                                <div className="flex items-center justify-center h-full text-white">
+                                  <div className="text-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
+                                    <p className="text-sm">Đang tải stream...</p>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <ScreenSharePlayer
+                                stream={remoteStream}
+                                username={sharingPeer.username}
+                                isLocal={false}
+                                streamVersion={streamVersion}
+                              />
+                            );
+                          }
+                        })()}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Regular Video Grid */}
-                {participants.map((participant) => {
-                  // Nếu là chính mình, dùng state local và local stream
-                  if (participant.isMe) {
+                {participants
+                  .filter(p => !(p.isScreenSharing && !p.isMe))
+                  .map((participant) => {
+                    if (participant.isMe) {
+                      return (
+                        <VideoPlayer
+                          key={participant.id}
+                          stream={localStream}
+                          username={participant.username}
+                          isMuted={!isAudioEnabled}
+                          isVideoOff={!isVideoEnabled}
+                          isLocal={true}
+                        />
+                      );
+                    }
+                    
+                    const remoteStream = remoteStreams.get(participant.id);
+                    console.log(`🎬 Rendering VideoPlayer for ${participant.username}:`, {
+                      hasStream: !!remoteStream,
+                      streamVersion,
+                      streamId: remoteStream?.id,
+                      tracks: remoteStream?.getTracks().map(t => ({kind: t.kind, enabled: t.enabled}))
+                    });
+                    
                     return (
                       <VideoPlayer
-                        key={participant.id}
-                        stream={localStream}
+                        key={`${participant.id}-${streamVersion}`}
+                        stream={remoteStream}
                         username={participant.username}
-                        isMuted={!isAudioEnabled}
-                        isVideoOff={!isVideoEnabled}
-                        isLocal={true}
+                        isMuted={participant.isMuted}
+                        isVideoOff={participant.isVideoOff}
+                        isLocal={false}
                       />
                     );
-                  }
-                  
-                  // Nếu là người khác, dùng remote stream
-                  const remoteStream = remoteStreams.get(participant.id);
-                  return (
-                    <VideoPlayer
-                      key={participant.id}
-                      stream={remoteStream}
-                      username={participant.username}
-                      isMuted={participant.isMuted}
-                      isVideoOff={participant.isVideoOff}
-                      isLocal={false}
-                    />
-                  );
                 })}
               </>
             )}
           </div>
         </div>
 
-        {/* Chat Sidebar */}
         <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col relative">
           <div className="px-4 py-3 border-b border-gray-700">
             <h3 className="text-white font-semibold flex items-center gap-2">
@@ -520,8 +565,8 @@ function App() {
                         <span className="text-xs text-gray-400">{msg.username}</span>
                         <span className="text-xs text-gray-500">{formatTime(msg.timestamp)}</span>
                       </div>
-                      <FileMessage 
-                        fileData={msg.fileData} 
+                      <FileMessage
+                        fileData={msg.fileData}
                         isOwn={msg.username === username}
                       />
                     </div>
@@ -555,10 +600,9 @@ function App() {
               accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
             />
             
-            {/* Emoji Picker - Nằm trong chat sidebar */}
             {showEmojiPicker && (
-              <div 
-                ref={emojiPickerRef} 
+              <div
+                ref={emojiPickerRef}
                 className="absolute bottom-full right-0 mb-2 shadow-2xl"
                 style={{ zIndex: 1000 }}
               >
@@ -575,20 +619,20 @@ function App() {
             )}
 
             <div className="flex items-center gap-2 bg-gray-700 rounded-xl p-2">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={toggleEmojiPicker}
                 className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
-                  showEmojiPicker 
-                    ? 'text-yellow-400 bg-gray-600' 
+                  showEmojiPicker
+                    ? 'text-yellow-400 bg-gray-600'
                     : 'text-gray-400 hover:text-white hover:bg-gray-600'
                 }`}
                 title="Chọn emoji"
               >
                 {showEmojiPicker ? <X className="w-5 h-5" /> : <Smile className="w-5 h-5" />}
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={handlePaperclipClick}
                 disabled={isUploading}
                 className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-600 transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"

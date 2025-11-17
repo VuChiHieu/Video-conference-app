@@ -18,11 +18,11 @@ class SocketService {
       });
 
       this.socket.on('connect', () => {
-        console.log('Connected to server:', this.socket.id);
+        console.log('✅ Connected to server:', this.socket.id);
       });
 
       this.socket.on('disconnect', () => {
-        console.log('Disconnected from server');
+        console.log('❌ Disconnected from server');
       });
 
       this.socket.on('connect_error', (error) => {
